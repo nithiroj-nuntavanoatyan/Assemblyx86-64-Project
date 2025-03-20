@@ -6,25 +6,25 @@ global _start
     ; นายอภิเชษฐ์ ธรรมรักษา 663040671-1
 
 section .bss
-    inputFilename resb 100   ; Buffer for input filename
-    outputFilename resb 100  ; Buffer for output filename
-    keyInput resb 4          ; Buffer for key (3 chars max + null terminator)
-    key_length resb 1        ; Store key length
+    inputFilename resb 100   ; reserve for input file name
+    outputFilename resb 100  ; reserve for output file name
+    keyInput resb 4          ; reserve for key (3 chars max + null terminator)
+    keylength resb 1        ; Store key length
     readbuffer resb buffer_size ; File content buffer (1KB)
     output_length resq 1
     byte_read resq 1
 
 section .data
     LF equ 10
-    sys_read equ 0           ; x86-64 syscall
-    sys_write equ 1
-    sys_open equ 2
-    sys_close equ 3
-    sys_exit equ 60
-    sys_creat equ 85
-    stdout equ 1
-    stdin equ 0
-    O_RDONLY equ 0
+    sys_read equ 0           ; read
+    sys_write equ 1          ; write
+    sys_open equ 2           ; open file
+    sys_close equ 3          ; close file
+    sys_exit equ 60          ; exit file
+    sys_creat equ 85         ; create file
+    stdout equ 1             ; standard out
+    stdin equ 0              ; standard in
+    O_RDONLY equ 000000q     ; read and write
     null equ 0
     buffer_size equ 1024
     file equ 100
@@ -69,39 +69,38 @@ section .data
 
 section .text
 _start:
-    mov rax, sys_write              ; write
-    mov rdi, stdout                 ; output
-    mov rsi, msgInputFileName       ; Enter input filename
+    mov rax, sys_write              
+    mov rdi, stdout                 
+    mov rsi, msgInputFileName       ; Enter input filename message
     mov rdx, msg_lenInputFileName   ; length of input file name message
-    syscall                         ; syscall instead of int 80h
+    syscall                         
 
-    mov rax, sys_read               ; read
-    mov rdi, stdin                  ; input
+    mov rax, sys_read               
+    mov rdi, stdin                  
     mov rsi, inputFilename          ; file name
     mov rdx, 99                     ; not 100 leave 1 space for making null terminator
     syscall
 
     cmp rax, 1                      ; check if byte read
-    jl error_empty_input
+    jl error_emptyinput
 
     dec rax
-    mov byte [inputFilename + rax], 0 ; replace last bit to 0 make it null terminated
+    mov byte [inputFilename + rax], 0 ; replace last one to 0 make it null terminated
 
-    ; Get output filename
     mov rax, sys_write              
     mov rdi, stdout                 
-    mov rsi, msgOutputFileName      ; enter output file name
+    mov rsi, msgOutputFileName      ; enter output file name message
     mov rdx, msg_lenOutputFileName  ; length of enter output filename message
     syscall
     
     mov rax, sys_read            
     mov rdi, stdin            
-    mov rsi, outputFilename         ; outputfilefromterminal
+    mov rsi, outputFilename         ; output file from terminal
     mov rdx, 99                     ; not 100 leave 1 space for making null terminator
     syscall
 
     cmp rax, 1                      ; check if byte read
-    jl error_empty_input
+    jl error_emptyinput
 
     dec rax
     mov byte [outputFilename + rax], 0 ; replace last bit to 0 make it null terminated
@@ -116,157 +115,134 @@ output_length_done:
     mov [output_length], bl ; store length from bl to output_length
 
     ; Get encryption key
-    mov rax, sys_write              ; sys_write
-    mov rdi, stdout                 ; stdout
+    mov rax, sys_write              
+    mov rdi, stdout                 
     mov rsi, msgKeyInput            ; message enter key
     mov rdx, msg_lenKeyInput        ; length of message enter key
     syscall
     
-    mov rax, sys_read               ; sys_read
-    mov rdi, stdin                  ; stdin
+    mov rax, sys_read               
+    mov rdi, stdin                  
     mov rsi, keyInput               ; recieve key input from terminal 
     mov rdx, 100                    ; 100 chars max for key
     syscall
 
-    ; Check if any bytes were read
-    cmp rax, 1                      ; At least 1 byte needed (will be newline)
-    jl error_empty_input
+    cmp rax, 1                      ; ckeck error
+    jl error_emptyinput
 
     cmp rax, 4
-    jg error_key_too_long 
+    jg errorkeylong 
 
-    ; Replace newline with null terminator
     dec rax
-    mov byte [keyInput + rax], 0
+    mov byte [keyInput + rax], 0    ; make it null terminate
 
-    ; function for finding keylength
+    ; find key length
     mov rbx, 0
-key_length_loop:
+loop_keylength:
     cmp byte [keyInput + rbx], 0    ; compare byte to check null terminator
-    je key_length_done
+    je findkeylength_finish
     inc rbx
-    jmp key_length_loop
-key_length_done:
-    mov [key_length], bl ; store key length from bl
+    jmp loop_keylength
+findkeylength_finish:
+    mov [keylength], bl             ; store key length from bl use bl because it the least in rbx
 
     ; Open input file
-    mov rax, sys_open               ; sys_open
-    mov rdi, inputFilename          ; filename (first argument)
-    mov rsi, O_RDONLY               ; O_RDONLY (read-only)
-    mov rdx, 0644o                  ; make permission to write file and can read
+    mov rax, sys_open               
+    mov rdi, inputFilename          ; filename to open
+    mov rsi, O_RDONLY               ; read only
+    mov rdx, 0644o                  ; make permission to write file and read file
     syscall
     
     ; Check for errors
     cmp rax, 0
-    jl error_open_file              ; Jump if negative (error)
-    mov [fileDescriptor], rax       ; Save file descriptor
+    jl error_openfile              
+    mov [fileDescriptor], rax       ; save file descriptor
     
-    ; Read file content
-    mov rax, sys_read               ; sys_read
+    mov rax, sys_read               
     mov rdi, [fileDescriptor]       ; file descriptor
-    mov rsi, readbuffer             ; buffer
-    mov rdx, buffer_size            ; 1024 bytes
+    mov rsi, readbuffer             ; address of where to place data
+    mov rdx, buffer_size            ; count of characters to read in this is 1024 byte
     syscall
     
-    ; Check for errors
     cmp rax, 0
-    jl error_read_file              ; Jump if negative (error)
-    mov [byte_read], rax                    ; Save number of bytes read in byte_read
+    jl error_readfile              ; Jump if rax < 0
+    mov [byte_read], rax            ; move number of byte that has read to byte read
     
-    ; Close input file
-    mov rax, sys_close              ; sys_close
+    mov rax, sys_close              ; close file
     mov rdi, [fileDescriptor]
     syscall
 
-    ; Print success message
-    mov rax, sys_write
+    mov rax, sys_write                  ; show read input file message
     mov rdi, stdout
     mov rsi, msgReadinginputFile
     mov rdx, msg_lenmsgReadinginputFile
     syscall
 
-    ; Encrypt with XOR
-    mov rsi, 0                      ; Set rsi to 0 (buffer index)
-    mov rbx, 0                      ; key index at 0
+    mov rsi, 0                      ; index for buffer to get character
+    mov rbx, 0                      ; index for key 
 
 encrypt_loop:
-    cmp rsi, [byte_read]                    ; check if processed all bytes
+    cmp rsi, [byte_read]            ; check if all byte are encrypted
     je write_file
     
-    ; Get character from buffer
-    mov al, [readbuffer + rsi]
+    mov al, [readbuffer + rsi]      ; get character from buffer at index    
+    mov cl, [keyInput + rbx]        ; get character from key at index
+    xor al, cl                      ; xor 
+    mov [readbuffer + rsi], al      ; store encrypted text to buffer in the same position as the original text
     
-    ; XOR with current key character  
-    mov cl, [keyInput + rbx]
-    xor al, cl
+    inc rsi                         ; increase index to find next buffer character
+    inc rbx                         ; increase index to find next key character
     
-    ; Store encrypted byte back to buffer
-    mov [readbuffer + rsi], al
-    
-    ; Move to next byte in buffer
-    inc rsi
-    
-    ; Move to next key character
-    inc rbx
-    
-    ; Check if we need to reset key index
-    cmp bl, [key_length]
+    cmp bl, [keylength]            ; compare the key value to key length if less encrypt buf if not less reset key so that it can loop again
     jl continue_encrypt
-    xor rbx, rbx                    ; reset key index if reached key length
+    mov rbx , 0                   ; reset key index if reached key length
 
 continue_encrypt:
     jmp encrypt_loop
 
-write_file:
-    ; Create output file
+write_file:   
     mov rax, sys_creat              ; create file
     mov rdi, outputFilename         ; filename
     mov rsi, 0644o                  ; permission
     syscall
 
     cmp rax, 0
-    jl error_open_file
+    jl error_openfile
     mov [fileDescriptor], rax
 
-    ; Write to output file
-    mov rax, sys_write
+    mov rax, sys_write              ; write file
     mov rdi, [fileDescriptor]
-    mov rsi, readbuffer
-    mov rdx, [byte_read]                ; number of bytes to write
+    mov rsi, readbuffer             ; address of characters to write
+    mov rdx, [byte_read]            ; number of bytes or character to write
     syscall
 
-    ; Print Generate....OK message
-    mov rax, sys_write
+    mov rax, sys_write                      ; show generating input file message
     mov rdi, stdout
     mov rsi, msgGenerateoutputFile
     mov rdx, msg_lenmsgGenerateoutputFile
     syscall
-
-    ; Print filename
-    mov rax, sys_write
+    
+    mov rax, sys_write                      ; show output file name
     mov rdi, stdout
     mov rsi, outputFilename
     mov rdx, [output_length]
     syscall
 
-    ; Print generated message
-    mov rax, sys_write
+    mov rax, sys_write                      ; show [filename] generated
     mov rdi, stdout
     mov rsi, msgGeneratedsuccess
     mov rdx, msg_lenmsgGeneratedsuccess
     syscall
     
-    ; Close output file
-    mov rax, sys_close
+    mov rax, sys_close                      ; close
     mov rdi, [fileDescriptor]
     syscall
     
-    ; Exit program
-    mov rax, sys_exit
-    mov rdi, success_exit                    ; return 0
+    mov rax, sys_exit                       ; exit
+    mov rdi, success_exit                   ; return 0
     syscall
 
-error_key_too_long:
+errorkeylong:
     mov rax, sys_write
     mov rdi, stdout
     mov rsi, errKeytooLong
@@ -274,7 +250,7 @@ error_key_too_long:
     syscall
     jmp exit_error
 
-error_empty_input:
+error_emptyinput:
     mov rax, sys_write
     mov rdi, stdout
     mov rsi, errEmptyInput
@@ -282,7 +258,7 @@ error_empty_input:
     syscall
     jmp exit_error
 
-error_open_file:
+error_openfile:
     mov rax, sys_write
     mov rdi, stdout
     mov rsi, errOpenFile
@@ -290,7 +266,7 @@ error_open_file:
     syscall
     jmp exit_error
     
-error_read_file:
+error_readfile:
     mov rax, sys_write
     mov rdi, stdout
     mov rsi, errReadFile
@@ -298,7 +274,7 @@ error_read_file:
     syscall
     jmp exit_error
     
-error_write_file:
+error_writefile:
     mov rax, sys_write
     mov rdi, stdout
     mov rsi, errWriteFile
